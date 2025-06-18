@@ -1,17 +1,55 @@
----
 name: release
 on:
   push:
     tags:
       - 'v*'
 jobs:
-  build:
+  build-and-package:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.ref_name }}
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Build x86_64 MUSL binary using Docker
+        run: |
+          docker build -t inotify-info-musl-x86_64 .
+          id=$(docker create inotify-info-musl-x86_64)
+          docker cp $id:/inotify-info ./inotify-info-x86_64
+          docker rm $id
+          chmod +x ./inotify-info-x86_64
+
+      - name: Set up QEMU for cross-building
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build aarch64 MUSL binary using Docker
+        run: |
+          docker buildx create --use
+          docker buildx build --platform linux/arm64 --output type=local,dest=out-aarch64 .
+          cp out-aarch64/inotify-info ./inotify-info-aarch64
+          chmod +x ./inotify-info-aarch64
+
+      - name: Package tar.gz for x86_64
+        run: |
+          mkdir pkg-x86_64
+          cp inotify-info-x86_64 pkg-x86_64/inotify-info
+          cp LICENSE README.md pkg-x86_64/
+          tar -czvf inotify-info-${TAG}-x86_64-unknown-linux-musl.tar.gz -C pkg-x86_64 .
+
+      - name: Package tar.gz for aarch64
+        run: |
+          mkdir pkg-aarch64
+          cp inotify-info-aarch64 pkg-aarch64/inotify-info
+          cp LICENSE README.md pkg-aarch64/
+          tar -czvf inotify-info-${TAG}-aarch64-unknown-linux-musl.tar.gz -C pkg-aarch64 .
+
       - name: Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/v')
         with:
+          files: |
+            inotify-info-${{ env.TAG }}-x86_64-unknown-linux-musl.tar.gz
+            inotify-info-${{ env.TAG }}-aarch64-unknown-linux-musl.tar.gz
           generate_release_notes: true
           draft: true
           prerelease: true
